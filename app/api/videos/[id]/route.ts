@@ -1,6 +1,5 @@
-// app/api/videos/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { readdir, stat } from 'fs/promises';
+import { readdir, stat, rm } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 
@@ -94,18 +93,36 @@ export async function DELETE(
   try {
     const videoId = params.id;
 
-    // This is just a placeholder - in a real implementation you would:
-    // 1. Check if the video directory exists
-    // 2. Delete the video directory and all its contents
-    // 3. Also delete the original video if it exists
+    // Check if the video directory exists
+    const videoDir = path.join(hlsDir, videoId);
+    if (!existsSync(videoDir)) {
+      return NextResponse.json({ error: 'Video not found' }, { status: 404 });
+    }
+
+    // Delete the directory and all its contents recursively
+    await rm(videoDir, { recursive: true, force: true });
+
+    // Check if there's an original video file (optional)
+    const originalVideoDir = path.join(process.cwd(), 'uploads', 'videos');
+    const possibleExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
+
+    for (const ext of possibleExtensions) {
+      const originalFilePath = path.join(originalVideoDir, `${videoId}${ext}`);
+      if (existsSync(originalFilePath)) {
+        await rm(originalFilePath);
+        break;
+      }
+    }
 
     return NextResponse.json({
       success: true,
       message: `Video ${videoId} deleted successfully`,
-      // Implementation required: Add actual file deletion logic
+      id: videoId,
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    console.error('Error deleting video:', error);
+
     return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }

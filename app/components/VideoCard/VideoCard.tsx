@@ -5,15 +5,17 @@ import Link from 'next/link';
 import { debounce } from 'lodash-es';
 import { useEffect, useRef } from 'react';
 import { initializeVideoPlayback } from '../../helpers/commonfunction';
+import { DeleteOutlined } from '@ant-design/icons';
 
 interface VideoCardProps {
   id: string;
   title: string;
   src: string; // URL for the video preview (could be an HLS preview)
   thumbnail: string; // URL for the thumbnail image
+  fetchVideos: () => void;
 }
 
-export default function VideoCard({ id, title, src, thumbnail }: VideoCardProps) {
+export default function VideoCard({ id, title, src, thumbnail, fetchVideos }: VideoCardProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Create the debounced play function once
@@ -64,7 +66,7 @@ export default function VideoCard({ id, title, src, thumbnail }: VideoCardProps)
         className="video-card"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        style={{ cursor: 'pointer' }}
+        style={{ cursor: 'pointer', position: 'relative' }}
       >
         <video
           ref={videoRef}
@@ -72,6 +74,26 @@ export default function VideoCard({ id, title, src, thumbnail }: VideoCardProps)
           muted
           playsInline
           style={{ width: '100%', height: 'auto', borderRadius: '8px' }}
+        />
+        <DeleteOutlined
+          style={{
+            color: 'red',
+            width: '16px',
+            height: '16px',
+            position: 'absolute',
+            top: '8px',
+            right: '8px',
+          }}
+          onClick={(e) => {
+            e.preventDefault();
+            fetch(`/api/videos/${id}`, {
+              method: 'DELETE',
+            }).then((res) => {
+              if (res.ok) {
+                fetchVideos();
+              }
+            });
+          }}
         />
         <h3 style={{ marginTop: '8px', fontSize: '16px' }}>{title}</h3>
       </div>

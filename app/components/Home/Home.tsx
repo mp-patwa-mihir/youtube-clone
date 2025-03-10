@@ -14,24 +14,24 @@ export default function HomeComponent() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [error, setError] = useState<string>('');
 
-  useEffect(() => {
-    const fetchVideos = async () => {
-      try {
-        const response = await fetch('/api/videos');
-        const data = await response.json();
+  const fetchVideos = async () => {
+    try {
+      const response = await fetch('/api/videos');
+      const data = await response.json();
 
-        if (data.error) {
-          setError(data.error);
-          return;
-        }
-
-        setVideos(data.videos);
-      } catch (err) {
-        setError('Failed to fetch videos');
-        console.error('Error fetching videos:', err);
+      if (data.error) {
+        setError(data.error);
+        return;
       }
-    };
 
+      setVideos(data.videos);
+    } catch (err) {
+      setError('Failed to fetch videos');
+      console.error('Error fetching videos:', err);
+    }
+  };
+
+  useEffect(() => {
     fetchVideos();
   }, []);
 
@@ -55,6 +55,7 @@ export default function HomeComponent() {
           title={video.title}
           src={video.src}
           thumbnail={`https://dummyimage.com/328x173.13/0000ff/fff`} // Keeping dummy thumbnail for now
+          fetchVideos={fetchVideos}
         />
       ))}
     </div>
