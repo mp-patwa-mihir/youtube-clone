@@ -72,13 +72,13 @@ async function convertToHLS(videoPath: string, outputDir: string) {
             '-i',
             videoPath,
             '-vf',
-            `scale=${width}:${height}`, // Scale video
+            `scale=${width}:${height}`,
             '-b:v',
-            bitrate, // Set bitrate
+            bitrate,
             '-preset',
-            'ultrafast', // Fastest encoding
+            'ultrafast',
             '-crf',
-            '23', // Quality adjustment
+            '23',
             '-start_number',
             '0',
             '-hls_time',
@@ -86,11 +86,11 @@ async function convertToHLS(videoPath: string, outputDir: string) {
             '-hls_list_size',
             '0',
             '-threads',
-            '4', // Limit CPU usage
+            '4',
             '-bufsize',
-            '256k', // Reduce RAM usage
+            '256k',
             '-f',
-            'hls', // Output as HLS
+            'hls',
             outputM3U8,
           ]);
 
@@ -102,7 +102,30 @@ async function convertToHLS(videoPath: string, outputDir: string) {
     ),
   );
 
-  // Create master playlist
+  // 🖼️ Generate Thumbnail (1st Frame)
+  const thumbnailPath = path.join(outputDir, 'thumbnail.jpg');
+  await new Promise((resolve, reject) => {
+    const ffmpegThumbnail = spawn('ffmpeg', [
+      '-i',
+      videoPath, // Input video
+      '-ss',
+      '00:00:01', // Capture at 1-second mark
+      '-vframes',
+      '1', // Take only one frame
+      '-vf',
+      'scale=320:-1', // Scale width to 320px, auto height
+      '-q:v',
+      '2', // Quality (lower is better)
+      thumbnailPath, // Output path
+    ]);
+
+    ffmpegThumbnail.on('close', (code) => {
+      if (code !== 0) reject(new Error(`FFmpeg thumbnail failed with code ${code}`));
+      else resolve(true);
+    });
+  });
+
+  // 📝 Create Master Playlist
   const masterPlaylist = resolutions
     .map(
       ({ name, width, height }) =>

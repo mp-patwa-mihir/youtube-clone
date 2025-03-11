@@ -76,7 +76,16 @@ export default function VideoCard({ id, title, src, thumbnail, fetchVideos }: Vi
           poster={thumbnail}
           muted
           playsInline
-          style={{ width: '100%', height: 'auto', borderRadius: '8px' }}
+          style={{
+            width: '100%',
+            maxWidth: '300px',
+            minWidth: '300px',
+            height: '100%',
+            minHeight: '170px',
+            maxHeight: '170px',
+            borderRadius: '8px',
+            objectFit: 'cover',
+          }}
         />
         <DeleteOutlined
           style={{

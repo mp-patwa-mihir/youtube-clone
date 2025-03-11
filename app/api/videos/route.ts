@@ -10,6 +10,7 @@ interface VideoItem {
   src: string;
   createdAt?: number;
   fileSize?: number;
+  thumbnail?: string;
 }
 
 // Configure the HLS directory path
@@ -17,27 +18,19 @@ const hlsDir: string = path.join(process.cwd(), 'public', 'hls');
 
 export async function GET(): Promise<NextResponse> {
   try {
-    // Check if the HLS directory exists
     if (!existsSync(hlsDir)) {
-      return NextResponse.json({
-        videos: [],
-        message: 'No videos available yet',
-      });
+      return NextResponse.json({ videos: [], message: 'No videos available yet' });
     }
 
-    // Read all directories inside the HLS folder
     const directories = await readdir(hlsDir, { withFileTypes: true });
-
-    // Filter to only get directories
     const videoDirs = directories.filter((dirent) => dirent.isDirectory());
 
-    // Map each directory to a video object
     const videos: VideoItem[] = await Promise.all(
       videoDirs.map(async (dir): Promise<VideoItem> => {
         const dirName = dir.name;
-
-        // Path to the master.m3u8 file
         const masterPlaylistPath = path.join(hlsDir, dirName, 'master.m3u8');
+        const thumbnailPath = path.join(hlsDir, dirName, 'thumbnail.jpg');
+
         if (!existsSync(masterPlaylistPath)) {
           return {
             id: dirName,
@@ -45,23 +38,21 @@ export async function GET(): Promise<NextResponse> {
             src: '',
             createdAt: 0,
             fileSize: 0,
+            thumbnail: '',
           };
         }
 
-        // Extract timestamp and original filename
         let title = dirName;
         let timestamp: number | undefined;
-
         const timestampMatch = dirName.match(/^(\d+)-(.+)$/);
         if (timestampMatch) {
           timestamp = parseInt(timestampMatch[1], 10);
           title = timestampMatch[2]
             .replace(/-/g, ' ')
-            .replace(/\.[^/.]+$/, '') // Remove extension if present
-            .replace(/\b\w/g, (char) => char.toUpperCase()); // Title Case
+            .replace(/\.[^/.]+$/, '')
+            .replace(/\b\w/g, (char) => char.toUpperCase());
         }
 
-        // Get the total size of HLS files in the directory
         let totalSize = 0;
         try {
           const files = await readdir(path.join(hlsDir, dirName));
@@ -76,23 +67,20 @@ export async function GET(): Promise<NextResponse> {
 
         return {
           id: dirName,
-          title: title,
-          src: `/hls/${dirName}/master.m3u8`, // Use master.m3u8 for adaptive streaming
+          title,
+          src: `/hls/${dirName}/master.m3u8`,
+          thumbnail: existsSync(thumbnailPath) ? `/hls/${dirName}/thumbnail.jpg` : '',
           createdAt: timestamp,
-          fileSize: totalSize, // Size in bytes
+          fileSize: totalSize,
         };
       }),
     );
 
-    // Filter out invalid videos and sort by creation date (newest first)
     const validVideos = videos
       .filter((video) => video.src !== '')
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
-    return NextResponse.json({
-      videos: validVideos,
-      count: validVideos.length,
-    });
+    return NextResponse.json({ videos: validVideos, count: validVideos.length });
   } catch (error: unknown) {
     console.error('Error listing videos:', error);
     return NextResponse.json({ error: 'Failed to fetch videos' }, { status: 500 });

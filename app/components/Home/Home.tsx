@@ -8,6 +8,7 @@ interface Video {
   title: string;
   src: string;
   createdAt?: number;
+  thumbnail?: string;
 }
 
 export default function HomeComponent() {
@@ -54,7 +55,7 @@ export default function HomeComponent() {
           id={video.id}
           title={video.title}
           src={video.src}
-          thumbnail={`https://dummyimage.com/328x173.13/0000ff/fff`} // Keeping dummy thumbnail for now
+          thumbnail={video.thumbnail}
           fetchVideos={fetchVideos}
         />
       ))}

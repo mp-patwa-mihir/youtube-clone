@@ -15,6 +15,7 @@ interface VideoDetails {
   duration?: number;
   fileSize?: number;
   segments?: number;
+  thumbnail?: string;
 }
 
 // Get video details
@@ -61,10 +62,15 @@ export async function GET(
       totalSize += fileStats.size;
     }
 
+    // 📌 Include Thumbnail URL
+    const thumbnailPath = path.join(videoDir, 'thumbnail.jpg');
+    const thumbnailUrl = existsSync(thumbnailPath) ? `/hls/${videoId}/thumbnail.jpg` : '';
+
     const videoDetails: VideoDetails = {
       id: videoId,
       title,
-      src: `/hls/${videoId}/master.m3u8`, // Use master playlist
+      src: `/hls/${videoId}/master.m3u8`,
+      thumbnail: thumbnailUrl, // Include thumbnail URL
       createdAt: timestamp,
       segments,
       fileSize: totalSize,
@@ -90,7 +96,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Video not found' }, { status: 404 });
     }
 
-    // Delete the HLS directory
+    // Delete the HLS directory (including thumbnail)
     await rm(videoDir, { recursive: true, force: true });
 
     // Delete the original uploaded video
