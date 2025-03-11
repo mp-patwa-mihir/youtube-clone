@@ -1,51 +1,56 @@
-// app/components/VideoCard.tsx
 'use client';
 
 import Link from 'next/link';
 import { debounce } from 'lodash-es';
 import { useEffect, useRef } from 'react';
-import { initializeVideoPlayback } from '../../helpers/commonfunction';
+import Hls from 'hls.js';
 import { DeleteOutlined } from '@ant-design/icons';
 
 interface VideoCardProps {
   id: string;
   title: string;
-  src: string; // URL for the video preview (could be an HLS preview)
-  thumbnail: string; // URL for the thumbnail image
+  src: string; // HLS video URL
+  thumbnail: string; // Thumbnail image URL
   fetchVideos: () => void;
 }
 
 export default function VideoCard({ id, title, src, thumbnail, fetchVideos }: VideoCardProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsInstanceRef = useRef<Hls | null>(null);
 
-  // Create the debounced play function once
+  // Debounce video playback to prevent excessive calls
   const debouncedPlay = useRef(
     debounce(() => {
       if (videoRef.current && src) {
-        initializeVideoPlayback(videoRef.current, src);
+        if (Hls.isSupported()) {
+          hlsInstanceRef.current = new Hls();
+          hlsInstanceRef.current.loadSource(src);
+          hlsInstanceRef.current.attachMedia(videoRef.current);
+        } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
+          videoRef.current.src = src;
+        }
+        videoRef.current.play().catch(() => {}); // Handle autoplay restrictions
       }
-    }, 500),
+    }, 300),
   ).current;
 
+  // Play video on hover
   const handleMouseEnter = () => {
     if (src) {
       debouncedPlay();
     }
   };
 
+  // Stop video and clean up HLS instance
   const handleMouseLeave = () => {
     debouncedPlay.cancel();
 
     if (videoRef.current) {
-      // Cleanup HLS if it was initialized
-      if (videoRef.current.hlsInstance) {
-        videoRef.current.hlsInstance.destroy();
-        delete videoRef.current.hlsInstance;
-      }
-
+      hlsInstanceRef.current?.destroy();
+      hlsInstanceRef.current = null;
       videoRef.current.pause();
-      videoRef.current.src = ''; // Clear the source
-      videoRef.current.load(); // Reset the video element
+      videoRef.current.src = ''; // Clear source
+      videoRef.current.load(); // Reset player
       videoRef.current.poster = thumbnail; // Reset to thumbnail
     }
   };
@@ -54,14 +59,12 @@ export default function VideoCard({ id, title, src, thumbnail, fetchVideos }: Vi
   useEffect(() => {
     return () => {
       debouncedPlay.cancel();
-      if (videoRef.current?.hlsInstance) {
-        videoRef.current.hlsInstance.destroy();
-      }
+      hlsInstanceRef.current?.destroy();
     };
   }, [debouncedPlay]);
 
   return (
-    <Link href={`/video/${id}`}>
+    <Link href={`/video/${id}`} passHref>
       <div
         className="video-card"
         onMouseEnter={handleMouseEnter}
@@ -78,21 +81,15 @@ export default function VideoCard({ id, title, src, thumbnail, fetchVideos }: Vi
         <DeleteOutlined
           style={{
             color: 'red',
-            width: '16px',
-            height: '16px',
+            fontSize: '16px',
             position: 'absolute',
             top: '8px',
             right: '8px',
           }}
-          onClick={(e) => {
+          onClick={async (e) => {
             e.preventDefault();
-            fetch(`/api/videos/${id}`, {
-              method: 'DELETE',
-            }).then((res) => {
-              if (res.ok) {
-                fetchVideos();
-              }
-            });
+            const res = await fetch(`/api/videos/${id}`, { method: 'DELETE' });
+            if (res.ok) fetchVideos();
           }}
         />
         <h3 style={{ marginTop: '8px', fontSize: '16px' }}>{title}</h3>

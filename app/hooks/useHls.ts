@@ -1,28 +1,23 @@
-// hooks/useHls.ts
-import { useRef, useEffect } from 'react';
-import { initializeVideoPlayback } from '../helpers/commonfunction';
+import { useRef, useEffect, useState } from 'react';
+import Hls from 'hls.js';
+import { initializeVideoPlayback, destroyVideoPlayback } from '../helpers/commonfunction';
 
 export function useHls(src: string, autoPlay: boolean = true) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [hlsInstance, setHlsInstance] = useState<Hls | null>(null);
 
   useEffect(() => {
-    // Only initialize HLS if we have both a video element and a source
     if (!videoRef.current || !src) return;
 
     // Initialize HLS playback
-    const hlsInstance = initializeVideoPlayback(videoRef.current, src, autoPlay);
+    const hls = initializeVideoPlayback(videoRef.current, src, autoPlay);
+    setHlsInstance(hls);
 
-    // Cleanup function
     return () => {
-      if (hlsInstance) {
-        hlsInstance.destroy();
-      }
-      // Ensure any stored reference is also cleared
-      if (videoRef.current?.hlsInstance) {
-        delete videoRef.current.hlsInstance;
-      }
+      destroyVideoPlayback(videoRef.current);
+      setHlsInstance(null);
     };
   }, [src, autoPlay]);
 
-  return { videoRef };
+  return { videoRef, hlsInstance };
 }

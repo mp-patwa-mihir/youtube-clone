@@ -5,6 +5,7 @@ import path from 'path';
 
 // HLS directory path
 const hlsDir: string = path.join(process.cwd(), 'public', 'hls');
+const uploadDir: string = path.join(process.cwd(), 'public', 'uploads'); // Corrected path
 
 interface VideoDetails {
   id: string;
@@ -16,31 +17,28 @@ interface VideoDetails {
   segments?: number;
 }
 
-// Get individual video details
+// Get video details
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
   try {
     const videoId = params.id;
-
-    // Check if the video directory exists
     const videoDir = path.join(hlsDir, videoId);
+
     if (!existsSync(videoDir)) {
       return NextResponse.json({ error: 'Video not found' }, { status: 404 });
     }
 
-    // Check if playlist.m3u8 exists
-    const m3u8Path = path.join(videoDir, 'playlist.m3u8');
-    if (!existsSync(m3u8Path)) {
+    // Ensure master.m3u8 exists
+    const masterPlaylistPath = path.join(videoDir, 'master.m3u8');
+    if (!existsSync(masterPlaylistPath)) {
       return NextResponse.json({ error: 'Invalid HLS video' }, { status: 400 });
     }
 
-    // Get video details
+    // Read all files in the directory
     const files = await readdir(videoDir);
-
-    // Count .ts segment files
-    const segments = files.filter((file) => file.endsWith('.ts')).length;
+    const segments = files.filter((file) => file.endsWith('.ts')).length; // Count segments
 
     // Extract title from directory name
     let title = videoId;
@@ -55,33 +53,27 @@ export async function GET(
         .replace(/\b\w/g, (char) => char.toUpperCase());
     }
 
-    // Try to get file stats for one of the segments to estimate size
-    let fileSize: number | undefined;
-    if (segments > 0) {
-      const segmentFile = files.find((file) => file.endsWith('.ts'));
-      if (segmentFile) {
-        const segmentStats = await stat(path.join(videoDir, segmentFile));
-        fileSize = segmentStats.size * segments; // Rough estimate
-      }
+    // Calculate file size (sum of all segment files)
+    let totalSize = 0;
+    for (const file of files) {
+      const filePath = path.join(videoDir, file);
+      const fileStats = await stat(filePath);
+      totalSize += fileStats.size;
     }
 
     const videoDetails: VideoDetails = {
       id: videoId,
-      title: title,
-      src: `/hls/${videoId}/playlist.m3u8`,
+      title,
+      src: `/hls/${videoId}/master.m3u8`, // Use master playlist
       createdAt: timestamp,
-      segments: segments,
-      fileSize: fileSize,
-      // Note: We can't accurately determine duration without parsing the m3u8 file
-      // or using ffprobe, which would require additional implementation
+      segments,
+      fileSize: totalSize,
     };
 
     return NextResponse.json(videoDetails);
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+  } catch (error) {
     console.error('Error fetching video details:', error);
-
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to fetch video details' }, { status: 500 });
   }
 }
 
@@ -92,24 +84,20 @@ export async function DELETE(
 ): Promise<NextResponse> {
   try {
     const videoId = params.id;
-
-    // Check if the video directory exists
     const videoDir = path.join(hlsDir, videoId);
+
     if (!existsSync(videoDir)) {
       return NextResponse.json({ error: 'Video not found' }, { status: 404 });
     }
 
-    // Delete the directory and all its contents recursively
+    // Delete the HLS directory
     await rm(videoDir, { recursive: true, force: true });
 
-    // Check if there's an original video file (optional)
-    const originalVideoDir = path.join(process.cwd(), 'uploads', 'videos');
-    const possibleExtensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
-
-    for (const ext of possibleExtensions) {
-      const originalFilePath = path.join(originalVideoDir, `${videoId}${ext}`);
-      if (existsSync(originalFilePath)) {
-        await rm(originalFilePath);
+    // Delete the original uploaded video
+    const uploadedFiles = await readdir(uploadDir);
+    for (const file of uploadedFiles) {
+      if (file.startsWith(videoId)) {
+        await rm(path.join(uploadDir, file));
         break;
       }
     }
@@ -119,10 +107,8 @@ export async function DELETE(
       message: `Video ${videoId} deleted successfully`,
       id: videoId,
     });
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+  } catch (error) {
     console.error('Error deleting video:', error);
-
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to delete video' }, { status: 500 });
   }
 }

@@ -1,18 +1,24 @@
 'use client';
-// context/VideoPlayerContext.tsx
+
 import React, { createContext, useContext, ReactNode } from 'react';
 import { useHls } from '../hooks/useHls';
+import Hls from 'hls.js';
 
 interface VideoPlayerContextType {
   videoRef: React.RefObject<HTMLVideoElement>;
+  hlsInstance: Hls | null;
 }
 
 const VideoPlayerContext = createContext<VideoPlayerContextType | undefined>(undefined);
 
 export function VideoPlayerProvider({ src, children }: { src: string; children: ReactNode }) {
-  const { videoRef } = useHls(src);
+  const { videoRef, hlsInstance } = useHls(src);
 
-  return <VideoPlayerContext.Provider value={{ videoRef }}>{children}</VideoPlayerContext.Provider>;
+  return (
+    <VideoPlayerContext.Provider value={{ videoRef, hlsInstance }}>
+      {children}
+    </VideoPlayerContext.Provider>
+  );
 }
 
 export function useVideoPlayerContext() {

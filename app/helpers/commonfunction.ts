@@ -1,7 +1,15 @@
-// hooks/useHlsUtils.ts
 import Hls from 'hls.js';
 
-// Common function to initialize HLS video playback
+// Store HLS instances separately to avoid modifying `videoElement`
+const hlsInstances = new Map<HTMLVideoElement, Hls>();
+
+/**
+ * Initializes HLS playback for a video element.
+ * @param videoElement The HTMLVideoElement where the video will be played.
+ * @param src The HLS video source (master.m3u8 URL).
+ * @param autoPlay Whether to autoplay the video (default: true).
+ * @returns The initialized Hls.js instance (if applicable).
+ */
 export function initializeVideoPlayback(
   videoElement: HTMLVideoElement,
   src: string,
@@ -9,103 +17,90 @@ export function initializeVideoPlayback(
 ): Hls | undefined {
   if (!videoElement || !src) return undefined;
 
-  // Clean up existing HLS instance if one exists
-  if (videoElement.hlsInstance) {
-    videoElement.hlsInstance.destroy();
-    videoElement.hlsInstance = undefined;
-  }
+  // Clean up existing HLS instance
+  destroyVideoPlayback(videoElement);
 
   let hlsInstance: Hls | undefined = undefined;
 
   if (Hls.isSupported()) {
     hlsInstance = new Hls({
-      // Adding some configuration to improve stability
       fragLoadingMaxRetry: 5,
       manifestLoadingMaxRetry: 5,
       levelLoadingMaxRetry: 5,
       fragLoadingRetryDelay: 1000,
     });
 
-    // Set up event handlers before loading the source
+    // Attach event handlers before loading the source
     hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-      // Delay play attempts to avoid AbortError
       if (autoPlay) {
         setTimeout(() => {
-          const playPromise = videoElement.play();
-
-          if (playPromise !== undefined) {
-            playPromise.catch((error) => {
-              console.error('Error auto-playing video:', error);
-              // If autoplay fails due to browser policy, we could show a play button
-              // or attempt to play with user interaction
-            });
-          }
+          videoElement.play().catch((error) => {
+            console.warn('Auto-play blocked:', error);
+          });
         }, 100);
       }
     });
 
-    // Handle errors gracefully
+    // Improved error handling
+    let errorCount = 0;
     hlsInstance.on(Hls.Events.ERROR, (event, data) => {
       if (data.fatal) {
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
             console.error('HLS network error', data);
-            hlsInstance?.startLoad(); // Try to recover on network errors
+            hlsInstance?.startLoad();
             break;
           case Hls.ErrorTypes.MEDIA_ERROR:
             console.error('HLS media error', data);
-            hlsInstance?.recoverMediaError(); // Try to recover media errors
+            if (errorCount < 3) {
+              hlsInstance?.recoverMediaError();
+            } else {
+              console.error('Too many errors, reloading...');
+              destroyVideoPlayback(videoElement);
+              initializeVideoPlayback(videoElement, src, autoPlay);
+            }
+            errorCount++;
             break;
           default:
             console.error('HLS fatal error', data);
-            if (hlsInstance) {
-              hlsInstance.destroy();
-            }
+            destroyVideoPlayback(videoElement);
             break;
         }
       }
     });
 
-    // Now load the source and attach media
+    // Load the source and attach to media
     hlsInstance.loadSource(src);
     hlsInstance.attachMedia(videoElement);
 
-    // Store the hls instance for reference
-    videoElement.hlsInstance = hlsInstance;
+    // Store the instance for cleanup
+    hlsInstances.set(videoElement, hlsInstance);
   } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
-    // For native HLS support, wait for loadedmetadata event
-    const playHandler = () => {
-      if (autoPlay) {
-        // Delay play to avoid race conditions
-        setTimeout(() => {
-          const playPromise = videoElement.play();
-
-          if (playPromise !== undefined) {
-            playPromise.catch((error) => {
-              console.error('Error auto-playing video:', error);
-            });
-          }
-        }, 100);
-      }
-    };
-
-    // For native HLS support (Safari)
+    // Native HLS support (Safari)
     videoElement.src = src;
-
-    // Clear any previous event listeners
-    videoElement.removeEventListener('loadedmetadata', playHandler);
-
-    videoElement.addEventListener('loadedmetadata', playHandler, { once: true });
+    videoElement.addEventListener(
+      'canplay',
+      () => {
+        if (autoPlay) {
+          videoElement.play().catch((error) => {
+            console.warn('Auto-play blocked:', error);
+          });
+        }
+      },
+      { once: true },
+    );
   }
 
   return hlsInstance;
 }
 
-// Function to properly clean up HLS resources
+/**
+ * Cleans up HLS playback and removes event listeners.
+ * @param videoElement The HTMLVideoElement to clean up.
+ */
 export function destroyVideoPlayback(videoElement: HTMLVideoElement): void {
   if (!videoElement) return;
 
-  // Stop any ongoing playback
   try {
     videoElement.pause();
     videoElement.removeAttribute('src');
@@ -114,20 +109,14 @@ export function destroyVideoPlayback(videoElement: HTMLVideoElement): void {
     console.error('Error while pausing video', e);
   }
 
-  // Clean up HLS instance
-  if (videoElement.hlsInstance) {
+  // Remove HLS instance if it exists
+  const hlsInstance = hlsInstances.get(videoElement);
+  if (hlsInstance) {
     try {
-      videoElement.hlsInstance.destroy();
-      videoElement.hlsInstance = undefined;
+      hlsInstance.destroy();
     } catch (e) {
       console.error('Error destroying HLS instance', e);
     }
-  }
-}
-
-// Add type declaration for the hlsInstance property
-declare global {
-  interface HTMLVideoElement {
-    hlsInstance?: Hls;
+    hlsInstances.delete(videoElement);
   }
 }

@@ -1,48 +1,36 @@
-// app/api/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { mkdir, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 
-// Configure the upload directory
-const uploadDir: string = path.join(process.cwd(), 'public', 'uploads');
-const hlsDir: string = path.join(process.cwd(), 'public', 'hls');
+// Upload & HLS directories
+const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+const hlsDir = path.join(process.cwd(), 'public', 'hls');
 
-// Response type
-interface UploadResponse {
-  success?: boolean;
-  url?: string;
-  message?: string;
-  error?: string;
-  conversionStatus?: string;
-}
+// Multi-quality resolutions
+const resolutions = [
+  { name: '120p', width: 160, height: 120, bitrate: '200k' },
+  { name: '320p', width: 480, height: 320, bitrate: '500k' },
+  { name: '480p', width: 854, height: 480, bitrate: '1000k' },
+  { name: '720p', width: 1280, height: 720, bitrate: '2500k' },
+  { name: '1080p', width: 1920, height: 1080, bitrate: '5000k' },
+];
 
 // Ensure directories exist
 async function ensureDirectories(): Promise<void> {
-  if (!existsSync(uploadDir)) {
-    await mkdir(uploadDir, { recursive: true });
-  }
-
-  if (!existsSync(hlsDir)) {
-    await mkdir(hlsDir, { recursive: true });
-  }
+  if (!existsSync(uploadDir)) await mkdir(uploadDir, { recursive: true });
+  if (!existsSync(hlsDir)) await mkdir(hlsDir, { recursive: true });
 }
 
-export async function POST(request: NextRequest): Promise<NextResponse<UploadResponse>> {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     await ensureDirectories();
 
-    // Handle the multipart form data
+    // Handle file upload
     const formData = await request.formData();
     const videoFile = formData.get('video') as File | null;
-
-    if (!videoFile) {
-      return NextResponse.json({ error: 'No video file provided' }, { status: 400 });
-    }
-
-    // Get file buffer
-    const buffer = Buffer.from(await videoFile.arrayBuffer());
+    if (!videoFile) return NextResponse.json({ error: 'No video file provided' }, { status: 400 });
 
     // Generate unique filename
     const timestamp = Date.now();
@@ -50,83 +38,82 @@ export async function POST(request: NextRequest): Promise<NextResponse<UploadRes
     const uniqueFilename = `${timestamp}-${originalFilename}`;
     const videoPath = path.join(uploadDir, uniqueFilename);
 
-    // Create output directory for HLS files
+    // HLS output directory
     const outputDirName = uniqueFilename.replace(/\.[^/.]+$/, ''); // Remove extension
     const outputDir = path.join(hlsDir, outputDirName);
     await mkdir(outputDir, { recursive: true });
 
-    // Write the uploaded file to disk
+    // Write file to disk
+    const buffer = Buffer.from(await videoFile.arrayBuffer());
     await writeFile(videoPath, buffer);
 
-    // Convert to HLS (.m3u8) using FFmpeg
-    const outputPath = path.join(outputDir, 'playlist.m3u8');
+    // Convert to HLS with multiple qualities
+    await convertToHLS(videoPath, outputDir);
 
-    // Return a promise for the FFmpeg conversion
-    const conversionResult = await new Promise<boolean>((resolve, reject) => {
-      // FFmpeg command to convert video to HLS format
-      const ffmpeg = spawn('ffmpeg', [
-        '-i',
-        videoPath, // Input file
-        '-profile:v',
-        'baseline', // Baseline profile for broader compatibility
-        '-level',
-        '3.0', // Level for compatibility
-        '-start_number',
-        '0', // Start segment numbering from 0
-        '-hls_time',
-        '10', // 10 second segments
-        '-hls_list_size',
-        '0', // Include all segments in the playlist
-        '-f',
-        'hls', // HLS format
-        outputPath, // Output path
-      ]);
-
-      let errorMessage = '';
-
-      ffmpeg.stderr.on('data', (data: Buffer) => {
-        // FFmpeg logs to stderr by default, even for non-errors
-        errorMessage += data.toString();
-      });
-
-      ffmpeg.on('close', (code: number) => {
-        if (code !== 0) {
-          console.error('FFmpeg process exited with code', code);
-          reject(new Error(`FFmpeg exited with code ${code}: ${errorMessage}`));
-        } else {
-          resolve(true);
-        }
-      });
-    });
-
-    // Construct the URL for the client
-    const publicHlsUrl = `/hls/${outputDirName}/playlist.m3u8`;
-
-    // Use the conversionResult to provide status information
+    // Return URL to the generated master playlist
     return NextResponse.json({
       success: true,
-      url: publicHlsUrl,
-      message: 'Video converted to HLS format successfully',
-      conversionStatus: conversionResult
-        ? 'Completed successfully'
-        : 'Conversion process ran but status unknown',
+      url: `/hls/${outputDirName}/master.m3u8`,
+      message: 'Video converted to HLS in multiple qualities successfully',
     });
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Failed to process video';
+  } catch (error) {
     console.error('Error processing upload:', error);
-
-    return NextResponse.json(
-      {
-        error: errorMessage,
-        success: false,
-        conversionStatus: 'Failed',
-      },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: 'Failed to process video', success: false }, { status: 500 });
   }
 }
 
-// Configure NextJS to allow larger uploads
+async function convertToHLS(videoPath: string, outputDir: string) {
+  await Promise.all(
+    resolutions.map(
+      ({ name, width, height, bitrate }) =>
+        new Promise((resolve, reject) => {
+          const outputM3U8 = path.join(outputDir, `${name}.m3u8`);
+          const ffmpeg = spawn('ffmpeg', [
+            '-i',
+            videoPath,
+            '-vf',
+            `scale=${width}:${height}`, // Scale video
+            '-b:v',
+            bitrate, // Set bitrate
+            '-preset',
+            'ultrafast', // Fastest encoding
+            '-crf',
+            '23', // Quality adjustment
+            '-start_number',
+            '0',
+            '-hls_time',
+            '10',
+            '-hls_list_size',
+            '0',
+            '-threads',
+            '4', // Limit CPU usage
+            '-bufsize',
+            '256k', // Reduce RAM usage
+            '-f',
+            'hls', // Output as HLS
+            outputM3U8,
+          ]);
+
+          ffmpeg.on('close', (code) => {
+            if (code !== 0) reject(new Error(`FFmpeg failed with code ${code}`));
+            else resolve(true);
+          });
+        }),
+    ),
+  );
+
+  // Create master playlist
+  const masterPlaylist = resolutions
+    .map(
+      ({ name, width, height }) =>
+        `#EXT-X-STREAM-INF:BANDWIDTH=500000,RESOLUTION=${width}x${height}\n${name}.m3u8`,
+    )
+    .join('\n');
+
+  await writeFile(path.join(outputDir, 'master.m3u8'), `#EXTM3U\n${masterPlaylist}`);
+}
+
+// Configure Next.js to allow large uploads
 export const config = {
   api: {
     bodyParser: false,

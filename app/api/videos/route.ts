@@ -1,6 +1,5 @@
-// app/api/videos/route.ts
 import { NextResponse } from 'next/server';
-import { readdir } from 'fs/promises';
+import { readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 
@@ -10,6 +9,7 @@ interface VideoItem {
   title: string;
   src: string;
   createdAt?: number;
+  fileSize?: number;
 }
 
 // Configure the HLS directory path
@@ -25,8 +25,7 @@ export async function GET(): Promise<NextResponse> {
       });
     }
 
-    // Read all directories in the HLS folder
-    // Each directory should contain a video's HLS files
+    // Read all directories inside the HLS folder
     const directories = await readdir(hlsDir, { withFileTypes: true });
 
     // Filter to only get directories
@@ -37,40 +36,50 @@ export async function GET(): Promise<NextResponse> {
       videoDirs.map(async (dir): Promise<VideoItem> => {
         const dirName = dir.name;
 
-        // Check if this directory contains an m3u8 file
-        const m3u8Path = path.join(hlsDir, dirName, 'playlist.m3u8');
-        const m3u8Exists = existsSync(m3u8Path);
-
-        if (!m3u8Exists) {
-          // Skip directories without m3u8 files
+        // Path to the master.m3u8 file
+        const masterPlaylistPath = path.join(hlsDir, dirName, 'master.m3u8');
+        if (!existsSync(masterPlaylistPath)) {
           return {
             id: dirName,
             title: 'Invalid video',
             src: '',
             createdAt: 0,
+            fileSize: 0,
           };
         }
 
         // Extract timestamp and original filename
-        // Assuming the directory name format is: timestamp-originalfilename
         let title = dirName;
         let timestamp: number | undefined;
 
         const timestampMatch = dirName.match(/^(\d+)-(.+)$/);
         if (timestampMatch) {
           timestamp = parseInt(timestampMatch[1], 10);
-          // Format the title by replacing hyphens with spaces and making it Title Case
           title = timestampMatch[2]
             .replace(/-/g, ' ')
             .replace(/\.[^/.]+$/, '') // Remove extension if present
             .replace(/\b\w/g, (char) => char.toUpperCase()); // Title Case
         }
 
+        // Get the total size of HLS files in the directory
+        let totalSize = 0;
+        try {
+          const files = await readdir(path.join(hlsDir, dirName));
+          for (const file of files) {
+            const filePath = path.join(hlsDir, dirName, file);
+            const fileStats = await stat(filePath);
+            totalSize += fileStats.size;
+          }
+        } catch (err) {
+          console.warn(`Failed to get size for ${dirName}:`, err);
+        }
+
         return {
           id: dirName,
           title: title,
-          src: `/hls/${dirName}/playlist.m3u8`,
+          src: `/hls/${dirName}/master.m3u8`, // Use master.m3u8 for adaptive streaming
           createdAt: timestamp,
+          fileSize: totalSize, // Size in bytes
         };
       }),
     );
@@ -85,9 +94,7 @@ export async function GET(): Promise<NextResponse> {
       count: validVideos.length,
     });
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     console.error('Error listing videos:', error);
-
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to fetch videos' }, { status: 500 });
   }
 }
