@@ -21,10 +21,10 @@ interface VideoDetails {
 // Get video details
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   try {
-    const videoId = params.id;
+    const { id: videoId } = await params;
     const videoDir = path.join(hlsDir, videoId);
 
     if (!existsSync(videoDir)) {
@@ -86,10 +86,10 @@ export async function GET(
 // Delete a video
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   try {
-    const videoId = params.id;
+    const { id: videoId } = await params;
     const videoDir = path.join(hlsDir, videoId);
 
     if (!existsSync(videoDir)) {
